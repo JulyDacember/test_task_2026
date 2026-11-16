@@ -28,6 +28,9 @@ class FakeEntity:
             "id": self.id,
             "name": self.name,
             "custom_fields_values": self.custom_fields_values,
+            "status_id": self.status_id,
+            "contacts": self.contacts,
+            "companies": self.companies,
         }
 
 
@@ -116,6 +119,25 @@ def generate_fixtures(
     return customers, leads
 
 
+def print_fixture_examples(customers, leads):
+    print("\n--- Пример покупателя ---")
+    print(customers[0].as_dict())
+
+    print("\n--- Пример сделки ---")
+    print(leads[0].as_dict())
+
+    print("\n--- Проверка уникальности логинов ---")
+
+    customer_logins = [
+        c.get_field("Логин")
+        for c in customers
+        if c.get_field("Логин")
+    ]
+
+    print("Уникальных логинов покупателей:", len(set(customer_logins)))
+    print("Всего покупателей с логином:", len(customer_logins))
+
+
 if __name__ == "__main__":
     customers, leads = generate_fixtures()
 
@@ -135,3 +157,5 @@ if __name__ == "__main__":
 
     print(f"Покупателей без логина: {customers_without_login}")
     print(f"Сделок без логина: {leads_without_login}")
+
+    print_fixture_examples(customers, leads)
