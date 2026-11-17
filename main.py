@@ -38,7 +38,7 @@ def lead_action(lead: Lead):
                 db.session.flush()
                 db.session.delete(abs_customer_login)
                 db.session.commit()
-                return
+                return abstract_customer
 
     return create_or_update_lead(abstract_customer, lead)
 
@@ -99,10 +99,18 @@ def collect_leads_customers(is_full=True):
             continue
         try:
             abc_customer = lead_action(amo_lead)
+
+            if abc_customer is None:
+                raise RuntimeError(
+                    f"Не удалось получить AbstractCustomer для сделки {amo_lead.id}"
+                )
+
             if is_full is True:
                 if abc_customer.id in ids_map:
                     ids_map[abc_customer.id]["leads"].append(amo_lead.id)
-                    ids_map[abc_customer.id]["contacts"].extend([c["id"] for c in amo_lead.contacts])
+                    ids_map[abc_customer.id]["contacts"].extend(
+                        [c["id"] for c in amo_lead.contacts]
+                    )
                 else:
                     ids_map[abc_customer.id] = {
                         "customers": [],
@@ -110,8 +118,13 @@ def collect_leads_customers(is_full=True):
                         "companies": [],
                         "leads": [amo_lead.id],
                     }
-        except Exception as e:
-            logger.exception(f'{amo_lead} {e}')
+
+        except Exception:
+            logger.exception(
+                "Ошибка обработки сделки %s. Синхронизация прервана.",
+                amo_lead,
+            )
+            raise
 
     if is_full is False:
         return
@@ -129,47 +142,65 @@ def collect_leads_customers(is_full=True):
         logger.exception(f"Чистка: {e}")
 
 
-def filter_merge_abstract_customer(abc_customer: AbstractCustomer, attr: str,
-                                   check_ids: List[int]):
-    entity = abc_customer.__getattribute__(attr)
-    for l in entity:
-        entity = [c for c in entity if
-                  'удалить' not in l['general'].get('name').lower() and l['general'].get('id') in check_ids]
-        setattr(abc_customer, attr, entity)
-        flag_modified(abc_customer, attr)
-        db.session.commit()
+def filter_merge_abstract_customer(
+    abc_customer: AbstractCustomer,
+    attr: str,
+    check_ids: List[int],
+):
+    entity = getattr(abc_customer, attr) or []
+
+    filtered_entities = [
+        item
+        for item in entity
+        if (
+            item.get("general", {}).get("id") in check_ids
+            and "удалить" not in (
+                item.get("general", {}).get("name") or ""
+            ).lower()
+        )
+    ]
+
+    setattr(abc_customer, attr, filtered_entities)
+    flag_modified(abc_customer, attr)
+
+    db.session.flush()
 
 
-def filter_abc_customer(abc_customer: AbstractCustomer, ids_map: Dict):
+def filter_abc_customer(
+    abc_customer: AbstractCustomer,
+    ids_map: Dict,
+):
+    customer_ids = ids_map.get(abc_customer.id, {})
+
     if abc_customer.amo_leads:
-        try:
-            filter_merge_abstract_customer(abc_customer=abc_customer,
-                                           attr="amo_leads",
-                                           check_ids=ids_map[abc_customer.id]["leads"])
-        except Exception as e:
-            logger.exception(e)
+        filter_merge_abstract_customer(
+            abc_customer=abc_customer,
+            attr="amo_leads",
+            check_ids=customer_ids.get("leads", []),
+        )
+
     if abc_customer.amo_customers:
-        try:
-            filter_merge_abstract_customer(abc_customer=abc_customer,
-                                           attr="amo_customers",
-                                           check_ids=ids_map[abc_customer.id]["customers"])
-        except Exception as e:
-            logger.exception(e)
+        filter_merge_abstract_customer(
+            abc_customer=abc_customer,
+            attr="amo_customers",
+            check_ids=customer_ids.get("customers", []),
+        )
+
     if abc_customer.amo_contacts:
-        try:
-            filter_merge_abstract_customer(abc_customer=abc_customer,
-                                           attr="amo_contacts",
-                                           check_ids=ids_map[abc_customer.id]["contacts"])
-        except Exception as e:
-            logger.exception(e)
+        filter_merge_abstract_customer(
+            abc_customer=abc_customer,
+            attr="amo_contacts",
+            check_ids=customer_ids.get("contacts", []),
+        )
+
     if abc_customer.amo_companies:
-        try:
-            filter_merge_abstract_customer(abc_customer=abc_customer,
-                                           attr="amo_companies",
-                                           check_ids=ids_map[abc_customer.id]["companies"])
-        except Exception as e:
-            logger.exception(e)
+        filter_merge_abstract_customer(
+            abc_customer=abc_customer,
+            attr="amo_companies",
+            check_ids=customer_ids.get("companies", []),
+        )
+
     if not abc_customer.amo_leads and not abc_customer.amo_customers:
-        db.session.flush()
         db.session.delete(abc_customer)
+
     db.session.commit()

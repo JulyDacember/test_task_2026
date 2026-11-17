@@ -478,7 +478,8 @@ class BusinessRulesTestCase(unittest.TestCase):
             "lead_action",
             side_effect=RuntimeError("simulated failure"),
         ):
-            main.collect_leads_customers(is_full=True)
+            with self.assertRaisesRegex(RuntimeError, "simulated failure"):
+                main.collect_leads_customers(is_full=True)
 
         self.assertIsNotNone(
             db.session.get(
